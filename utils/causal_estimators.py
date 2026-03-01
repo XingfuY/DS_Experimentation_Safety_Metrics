@@ -75,7 +75,7 @@ def parallel_trends_test(
     Returns:
         Dict with F-test result and period-specific estimates.
     """
-    df = df.copy()
+    df = df.copy().reset_index(drop=True)
     periods = sorted(df[time_col].unique())
     pre_periods = periods[:n_pre_periods]
 
@@ -88,7 +88,7 @@ def parallel_trends_test(
 
     time_dummies = pd.get_dummies(df[time_col], prefix="t", drop_first=True).astype(float)
     X = pd.concat([
-        pd.DataFrame({"treat": df[treat_col].values}),
+        df[[treat_col]].rename(columns={treat_col: "treat"}),
         time_dummies,
         df[interaction_cols],
     ], axis=1)
