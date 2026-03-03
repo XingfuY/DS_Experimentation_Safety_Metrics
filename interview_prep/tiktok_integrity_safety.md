@@ -112,7 +112,11 @@ CREATE TABLE user_violations (
 );
 ```
 
-### Problem 1: Basic Ratio — Content Removal Rate by Type
+### 2.1 PostgreSQL
+
+All 15 problems below use PostgreSQL syntax. For MySQL 8+ equivalents, see **2.2**. For a dialect comparison chart, see **2.3**.
+
+#### Problem 1 (PG): Basic Ratio — Content Removal Rate by Type
 
 **Problem**: Calculate the content removal rate (fraction of content items that were removed) for each content_type, ordered from highest to lowest.
 
@@ -129,7 +133,7 @@ ORDER BY removal_rate DESC;
 
 **Explanation**: Straightforward aggregation with a conditional sum. The `::DECIMAL` cast prevents integer division. This is the kind of ratio the team monitors daily — if `live` suddenly has 2x the removal rate of `video`, that signals either an emerging abuse vector in live streams or a classifier calibration issue.
 
-### Problem 2: Date Filtering — Reports in the Last 30 Days by Reason
+#### Problem 2 (PG): Date Filtering — Reports in the Last 30 Days by Reason
 
 **Problem**: Count the number of reports filed in the last 30 days, broken down by report_reason. Only include reasons with more than 100 reports.
 
@@ -146,7 +150,7 @@ ORDER BY report_count DESC;
 
 **Explanation**: `HAVING` filters after aggregation, `WHERE` filters before. The `INTERVAL` syntax is PostgreSQL-standard. In a safety context, this query is a quick health check: if "spam" reports suddenly dominate, it may indicate a spam wave; if "hate_speech" reports increase in a specific region, it may follow a real-world event.
 
-### Problem 3: JOIN — False Positive Rate by Moderator Type
+#### Problem 3 (PG): JOIN — False Positive Rate by Moderator Type
 
 **Problem**: For each moderator_type, calculate the false positive rate — defined as the fraction of 'remove' actions that were later 'reinstate'd on appeal.
 
@@ -168,7 +172,7 @@ ORDER BY fpr DESC;
 
 **Explanation**: Self-join on `moderation_actions` — removals joined to reinstatements on the same content_id. `NULLIF` prevents division by zero. `LEFT JOIN` ensures we count content that was removed but never appealed/reinstated. This metric directly measures enforcement quality: if `automated` has 8% FPR and `human` has 2%, the automated system needs calibration improvement.
 
-### Problem 4: GROUP BY with Multiple Dimensions — Violation Heatmap
+#### Problem 4 (PG): GROUP BY with Multiple Dimensions — Violation Heatmap
 
 **Problem**: For each (region, violation_category) pair, calculate the total number of violations in 2025. Return only pairs with more than 50 violations. Order by violation count descending.
 
@@ -189,7 +193,7 @@ ORDER BY violation_count DESC;
 
 **Explanation**: Two-dimensional GROUP BY to build a heatmap. This is a core safety analytics query — identifying geographic hotspots for specific violation types helps prioritize classifier improvement (e.g., if "hate_speech" is disproportionately high in region X, check if the classifier supports that region's dominant languages).
 
-### Problem 5: Subquery — Repeat Offenders
+#### Problem 5 (PG): Subquery — Repeat Offenders
 
 **Problem**: Find users who have been removed content more than 5 times in the last 90 days but are still in 'active' status.
 
@@ -216,7 +220,7 @@ ORDER BY removal_count DESC;
 
 **Explanation**: Correlated subquery to get each user's most recent status. The main query joins content items to moderation actions, filters for removals in the last 90 days, and aggregates by creator. The HAVING clause filters for repeat offenders. These are enforcement gaps — users who should have been escalated to 'warned' or 'restricted' but slipped through.
 
-### Problem 6: Window Function — Running Violation Count per User
+#### Problem 6 (PG): Window Function — Running Violation Count per User
 
 **Problem**: For each user violation record, compute the cumulative violation count for that user up to that date.
 
@@ -237,7 +241,7 @@ ORDER BY user_id, violation_date;
 
 **Explanation**: `SUM() OVER(PARTITION BY ... ORDER BY ... ROWS BETWEEN ...)` computes a running total. The frame specification `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` is the default for ordered window functions but it is good practice to state it explicitly. This tracks how users escalate over time — useful for calibrating the strike-to-ban policy.
 
-### Problem 7: 7-Day Rolling Average — Daily Removal Rate
+#### Problem 7 (PG): 7-Day Rolling Average — Daily Removal Rate
 
 **Problem**: Compute the 7-day rolling average of the daily content removal rate.
 
@@ -264,7 +268,7 @@ ORDER BY dt;
 
 **Explanation**: First CTE aggregates to daily grain. Window function `AVG() OVER(ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` computes the 7-day trailing average (current day + 6 prior days = 7 days). This is the exact pattern from the Round 1 interview. In production, this query powers the daily safety dashboard — the 7-day rolling average smooths out day-of-week effects (weekends typically have different content volumes and moderation staffing).
 
-### Problem 8: CTE + Self-Join — Time Between Report and Action
+#### Problem 8 (PG): CTE + Self-Join — Time Between Report and Action
 
 **Problem**: Calculate the median time (in hours) between a content report and the first moderation action, broken down by violation_category.
 
@@ -300,7 +304,7 @@ ORDER BY median_hours_to_action DESC;
 
 **Explanation**: Two CTEs compute the earliest report and earliest action per content item. The join computes the time delta. `PERCENTILE_CONT(0.5)` gives the exact median (interpolated). This metric — time-to-action — is a critical SLA metric for safety teams. If median time-to-action for "CSAM" is anything above a few minutes, that's an emergency.
 
-### Problem 9: LAG/LEAD — Detecting Escalation Patterns
+#### Problem 9 (PG): LAG/LEAD — Detecting Escalation Patterns
 
 **Problem**: For each user, identify when they escalated from 'warned' to 'restricted' status. Show the user, the date they were warned, the date they were restricted, and the number of days between.
 
@@ -327,7 +331,7 @@ ORDER BY days_between ASC;
 
 **Explanation**: `LAG()` accesses the previous row within each user's timeline. Filtering for transitions from 'warned' to 'restricted' identifies escalation events. The `days_between` distribution informs policy: if 80% of escalations happen within 3 days, perhaps the warning is ineffective and we should consider earlier restriction.
 
-### Problem 10: RANK + Filtering — Top Reported Creators per Region
+#### Problem 10 (PG): RANK + Filtering — Top Reported Creators per Region
 
 **Problem**: For each region, find the top 3 most-reported creators in the last 30 days.
 
@@ -354,7 +358,7 @@ ORDER BY region, rnk;
 
 **Explanation**: `RANK()` within each region partition. Using `RANK()` (not `ROW_NUMBER()`) means ties at the boundary get the same rank — if two creators are tied at #3, both appear. This is a daily operations query: the top-reported creators are candidates for manual review or escalated enforcement.
 
-### Problem 11: Sessionization — User Report Sessions
+#### Problem 11 (PG): Sessionization — User Report Sessions
 
 **Problem**: Group a user's reports into sessions where consecutive reports within 5 minutes of each other belong to the same session. Count the number of sessions and average reports per session for each reporter.
 
@@ -393,7 +397,7 @@ ORDER BY avg_reports_per_session DESC;
 
 **Explanation**: Classic sessionization pattern. `LAG()` computes time gap between consecutive reports. If gap > 5 minutes, mark as new session. Cumulative sum of the new_session_flag gives session IDs. Users with very high avg_reports_per_session (e.g., 50+ reports in a single session) may be "report bombers" — weaponizing the report system to harass creators. This feature is directly useful for abuse detection.
 
-### Problem 12: Funnel Analysis — Content Moderation Pipeline
+#### Problem 12 (PG): Funnel Analysis — Content Moderation Pipeline
 
 **Problem**: Build a funnel showing: (1) total content posted, (2) content flagged by automated system, (3) content reviewed by human moderator, (4) content actually removed. Calculate conversion rates at each step.
 
@@ -429,7 +433,7 @@ ORDER BY week;
 
 **Explanation**: LEFT JOINs preserve all content in the funnel. Each subsequent step is a subset. The conversion rates between steps reveal bottlenecks: if auto-flag rate is 5% but human_review_rate is only 20%, the human moderation team is overwhelmed (80% of flagged content is never human-reviewed). This directly informs staffing and automation investment decisions.
 
-### Problem 13: Cohort Retention — Creator Retention After First Violation
+#### Problem 13 (PG): Cohort Retention — Creator Retention After First Violation
 
 **Problem**: For creators who received their first violation in each month, what fraction continued posting content 30, 60, and 90 days later?
 
@@ -481,7 +485,7 @@ ORDER BY cohort_month;
 
 **Explanation**: Cohort analysis applied to content safety. The first CTE identifies each creator's first violation date and assigns a cohort month. The second CTE checks whether the creator posted any new content in the 30-60, 60-90, and 90-120 day windows after that first violation. If retention_30d drops sharply for a specific cohort month, it may correlate with a policy change that was too punitive — valuable for calibrating enforcement severity.
 
-### Problem 14: Recursive CTE — Escalation Chains
+#### Problem 14 (PG): Recursive CTE — Escalation Chains
 
 **Problem**: Some moderation actions reference prior actions (e.g., an appeal references the original removal). Given a parent_action_id column in moderation_actions, find the full chain of actions for a given content item, from initial flag through final resolution.
 
@@ -532,7 +536,7 @@ ORDER BY chain_depth;
 
 **Explanation**: Recursive CTE traverses the action tree. The base case selects root actions (no parent). The recursive step joins back to find child actions. The `chain_depth < 10` guard prevents infinite loops. The `chain_path` array tracks the full sequence. In practice, this reveals patterns like: auto-flag -> human-remove -> creator-appeal -> appeal-reinstate -> re-flag -> re-remove, indicating a back-and-forth that suggests either an edge-case violation or an inconsistent policy.
 
-### Problem 15: Complex Analytics — Comparing Enforcement Consistency Across Regions
+#### Problem 15 (PG): Complex Analytics — Comparing Enforcement Consistency Across Regions
 
 **Problem**: For each violation_category, compute the removal rate by region, then flag regions where the removal rate deviates more than 2 standard deviations from the global mean for that category.
 
@@ -575,6 +579,530 @@ ORDER BY ABS((rr.removal_rate - cs.mean_rate) / NULLIF(cs.std_rate, 0)) DESC;
 ```
 
 **Explanation**: Two-pass analysis: first compute regional removal rates, then compute cross-region statistics per category. Z-score identifies outlier regions. A region with z > 2 (much higher removal rate) may have stricter enforcement or a genuine abuse hotspot. A region with z < -2 (much lower removal rate) may have under-enforcement — possibly due to language coverage gaps in the classifier. This query directly supports the team's goal of global enforcement consistency.
+
+### 2.2 MySQL 8+
+
+The same 15 problems rewritten for MySQL 8.0+. Problem statements and explanations are identical to 2.1 — only the SQL dialect changes. Each block shows the full MySQL query followed by **Conversion Notes** listing every syntactic change from the PostgreSQL version.
+
+#### Problem 1 (MySQL): Basic Ratio — Content Removal Rate by Type
+
+```sql
+SELECT
+    content_type,
+    COUNT(*) AS total_content,
+    SUM(CASE WHEN is_removed THEN 1 ELSE 0 END) AS removed_count,
+    ROUND(CAST(SUM(CASE WHEN is_removed THEN 1 ELSE 0 END) AS DECIMAL(10,4)) / COUNT(*), 4) AS removal_rate
+FROM content_items
+GROUP BY content_type
+ORDER BY removal_rate DESC;
+```
+
+**Conversion Notes**:
+- `::DECIMAL` → `CAST(... AS DECIMAL(10,4))`
+
+#### Problem 2 (MySQL): Date Filtering — Reports in the Last 30 Days by Reason
+
+```sql
+SELECT
+    report_reason,
+    COUNT(*) AS report_count
+FROM content_reports
+WHERE reported_at >= CURRENT_DATE - INTERVAL 30 DAY
+GROUP BY report_reason
+HAVING COUNT(*) > 100
+ORDER BY report_count DESC;
+```
+
+**Conversion Notes**:
+- `INTERVAL '30 days'` → `INTERVAL 30 DAY` (no quotes, singular unit keyword)
+
+#### Problem 3 (MySQL): JOIN — False Positive Rate by Moderator Type
+
+```sql
+SELECT
+    r.moderator_type,
+    COUNT(DISTINCT r.content_id) AS total_removals,
+    COUNT(DISTINCT a.content_id) AS reinstated_count,
+    ROUND(CAST(COUNT(DISTINCT a.content_id) AS DECIMAL(10,4)) / NULLIF(COUNT(DISTINCT r.content_id), 0), 4) AS fpr
+FROM moderation_actions r
+LEFT JOIN moderation_actions a
+    ON r.content_id = a.content_id
+    AND a.action = 'reinstate'
+    AND a.moderator_type = 'appeal_review'
+WHERE r.action = 'remove'
+GROUP BY r.moderator_type
+ORDER BY fpr DESC;
+```
+
+**Conversion Notes**:
+- `::DECIMAL` → `CAST(... AS DECIMAL(10,4))`
+
+#### Problem 4 (MySQL): GROUP BY with Multiple Dimensions — Violation Heatmap
+
+```sql
+SELECT
+    region,
+    violation_category,
+    COUNT(*) AS violation_count
+FROM content_items ci
+JOIN moderation_actions ma ON ci.content_id = ma.content_id
+WHERE ma.action = 'remove'
+  AND ma.actioned_at >= '2025-01-01'
+  AND ma.actioned_at < '2026-01-01'
+GROUP BY region, violation_category
+HAVING COUNT(*) > 50
+ORDER BY violation_count DESC;
+```
+
+**Conversion Notes**:
+- No changes — already standard SQL.
+
+#### Problem 5 (MySQL): Subquery — Repeat Offenders
+
+```sql
+SELECT
+    ci.creator_id,
+    COUNT(DISTINCT ma.content_id) AS removal_count,
+    uv.account_status
+FROM content_items ci
+JOIN moderation_actions ma
+    ON ci.content_id = ma.content_id
+    AND ma.action = 'remove'
+    AND ma.actioned_at >= CURRENT_DATE - INTERVAL 90 DAY
+JOIN (
+    SELECT user_id, account_status
+    FROM user_violations
+    WHERE violation_date = (SELECT MAX(violation_date) FROM user_violations uv2 WHERE uv2.user_id = user_violations.user_id)
+) uv ON ci.creator_id = uv.user_id
+WHERE uv.account_status = 'active'
+GROUP BY ci.creator_id, uv.account_status
+HAVING COUNT(DISTINCT ma.content_id) > 5
+ORDER BY removal_count DESC;
+```
+
+**Conversion Notes**:
+- `INTERVAL '90 days'` → `INTERVAL 90 DAY`
+
+#### Problem 6 (MySQL): Window Function — Running Violation Count per User
+
+```sql
+SELECT
+    user_id,
+    violation_date,
+    violation_category,
+    strike_count,
+    SUM(strike_count) OVER (
+        PARTITION BY user_id
+        ORDER BY violation_date
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_strikes
+FROM user_violations
+ORDER BY user_id, violation_date;
+```
+
+**Conversion Notes**:
+- No changes — window function syntax is identical in MySQL 8+.
+
+#### Problem 7 (MySQL): 7-Day Rolling Average — Daily Removal Rate
+
+```sql
+WITH daily_stats AS (
+    SELECT
+        DATE(created_at) AS dt,
+        COUNT(*) AS total_content,
+        SUM(CASE WHEN is_removed THEN 1 ELSE 0 END) AS removed_count,
+        CAST(SUM(CASE WHEN is_removed THEN 1 ELSE 0 END) AS DECIMAL(10,4)) / COUNT(*) AS daily_removal_rate
+    FROM content_items
+    GROUP BY DATE(created_at)
+)
+SELECT
+    dt,
+    daily_removal_rate,
+    AVG(daily_removal_rate) OVER (
+        ORDER BY dt
+        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) AS rolling_7d_avg
+FROM daily_stats
+ORDER BY dt;
+```
+
+**Conversion Notes**:
+- `::DECIMAL` → `CAST(... AS DECIMAL(10,4))`
+
+#### Problem 8 (MySQL): CTE + Self-Join — Time Between Report and Action
+
+```sql
+WITH first_report AS (
+    SELECT
+        content_id,
+        MIN(reported_at) AS first_reported_at
+    FROM content_reports
+    GROUP BY content_id
+),
+first_action AS (
+    SELECT
+        content_id,
+        violation_category,
+        MIN(actioned_at) AS first_actioned_at
+    FROM moderation_actions
+    WHERE action IN ('remove', 'restrict', 'warn', 'no_action')
+    GROUP BY content_id, violation_category
+),
+time_deltas AS (
+    SELECT
+        fa.violation_category,
+        TIMESTAMPDIFF(SECOND, fr.first_reported_at, fa.first_actioned_at) / 3600.0 AS hours_to_action
+    FROM first_report fr
+    JOIN first_action fa ON fr.content_id = fa.content_id
+    WHERE fa.first_actioned_at >= fr.first_reported_at
+),
+ranked AS (
+    SELECT
+        violation_category,
+        hours_to_action,
+        ROW_NUMBER() OVER (PARTITION BY violation_category ORDER BY hours_to_action) AS rn,
+        COUNT(*) OVER (PARTITION BY violation_category) AS cnt
+    FROM time_deltas
+)
+SELECT
+    violation_category,
+    AVG(hours_to_action) AS median_hours_to_action,
+    cnt AS sample_size
+FROM ranked
+WHERE rn IN (FLOOR((cnt + 1) / 2), CEIL((cnt + 1) / 2))
+GROUP BY violation_category, cnt
+ORDER BY median_hours_to_action DESC;
+```
+
+**Conversion Notes**:
+- `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ...)` → ROW_NUMBER-based median pattern (MySQL has no built-in percentile aggregate)
+- `EXTRACT(EPOCH FROM (ts1 - ts2))` → `TIMESTAMPDIFF(SECOND, ts2, ts1)` (note: start comes before end in TIMESTAMPDIFF)
+- Median logic: FLOOR and CEIL of `(cnt+1)/2` selects one row for odd counts, averages two middle rows for even counts
+
+#### Problem 9 (MySQL): LAG/LEAD — Detecting Escalation Patterns
+
+```sql
+WITH status_changes AS (
+    SELECT
+        user_id,
+        violation_date,
+        account_status,
+        LAG(account_status) OVER (PARTITION BY user_id ORDER BY violation_date) AS prev_status,
+        LAG(violation_date) OVER (PARTITION BY user_id ORDER BY violation_date) AS prev_date
+    FROM user_violations
+)
+SELECT
+    user_id,
+    prev_date AS warned_date,
+    violation_date AS restricted_date,
+    DATEDIFF(violation_date, prev_date) AS days_between
+FROM status_changes
+WHERE prev_status = 'warned'
+  AND account_status = 'restricted'
+ORDER BY days_between ASC;
+```
+
+**Conversion Notes**:
+- `violation_date - prev_date` (PG returns integer days) → `DATEDIFF(violation_date, prev_date)` (MySQL: end date first, start date second)
+
+#### Problem 10 (MySQL): RANK + Filtering — Top Reported Creators per Region
+
+```sql
+WITH creator_reports AS (
+    SELECT
+        ci.region,
+        ci.creator_id,
+        COUNT(DISTINCT cr.report_id) AS report_count,
+        RANK() OVER (
+            PARTITION BY ci.region
+            ORDER BY COUNT(DISTINCT cr.report_id) DESC
+        ) AS rnk
+    FROM content_reports cr
+    JOIN content_items ci ON cr.content_id = ci.content_id
+    WHERE cr.reported_at >= CURRENT_DATE - INTERVAL 30 DAY
+    GROUP BY ci.region, ci.creator_id
+)
+SELECT region, creator_id, report_count, rnk
+FROM creator_reports
+WHERE rnk <= 3
+ORDER BY region, rnk;
+```
+
+**Conversion Notes**:
+- `INTERVAL '30 days'` → `INTERVAL 30 DAY`
+
+#### Problem 11 (MySQL): Sessionization — User Report Sessions
+
+```sql
+WITH ordered_reports AS (
+    SELECT
+        reporter_id,
+        reported_at,
+        CASE
+            WHEN TIMESTAMPDIFF(SECOND, LAG(reported_at) OVER (PARTITION BY reporter_id ORDER BY reported_at), reported_at) > 300
+            THEN 1
+            ELSE 0
+        END AS new_session_flag
+    FROM content_reports
+),
+sessioned AS (
+    SELECT
+        reporter_id,
+        reported_at,
+        SUM(new_session_flag) OVER (
+            PARTITION BY reporter_id
+            ORDER BY reported_at
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS session_id
+    FROM ordered_reports
+)
+SELECT
+    reporter_id,
+    COUNT(DISTINCT session_id) AS num_sessions,
+    CAST(COUNT(*) AS DECIMAL(10,4)) / NULLIF(COUNT(DISTINCT session_id), 0) AS avg_reports_per_session
+FROM sessioned
+GROUP BY reporter_id
+HAVING COUNT(*) >= 10
+ORDER BY avg_reports_per_session DESC;
+```
+
+**Conversion Notes**:
+- `reported_at - LAG(reported_at) ... > INTERVAL '5 minutes'` → `TIMESTAMPDIFF(SECOND, LAG(reported_at) OVER (...), reported_at) > 300` (PG timestamp subtraction returns INTERVAL; MySQL requires TIMESTAMPDIFF)
+- `::DECIMAL` → `CAST(... AS DECIMAL(10,4))`
+
+#### Problem 12 (MySQL): Funnel Analysis — Content Moderation Pipeline
+
+```sql
+WITH funnel AS (
+    SELECT
+        DATE(ci.created_at - INTERVAL WEEKDAY(ci.created_at) DAY) AS week,
+        COUNT(DISTINCT ci.content_id) AS total_posted,
+        COUNT(DISTINCT CASE WHEN auto.content_id IS NOT NULL THEN ci.content_id END) AS auto_flagged,
+        COUNT(DISTINCT CASE WHEN human.content_id IS NOT NULL THEN ci.content_id END) AS human_reviewed,
+        COUNT(DISTINCT CASE WHEN removed.content_id IS NOT NULL THEN ci.content_id END) AS removed
+    FROM content_items ci
+    LEFT JOIN moderation_actions auto
+        ON ci.content_id = auto.content_id AND auto.moderator_type = 'automated'
+    LEFT JOIN moderation_actions human
+        ON ci.content_id = human.content_id AND human.moderator_type = 'human'
+    LEFT JOIN moderation_actions removed
+        ON ci.content_id = removed.content_id AND removed.action = 'remove'
+    GROUP BY DATE(ci.created_at - INTERVAL WEEKDAY(ci.created_at) DAY)
+)
+SELECT
+    week,
+    total_posted,
+    auto_flagged,
+    ROUND(CAST(auto_flagged AS DECIMAL(10,4)) / NULLIF(total_posted, 0), 4) AS flag_rate,
+    human_reviewed,
+    ROUND(CAST(human_reviewed AS DECIMAL(10,4)) / NULLIF(auto_flagged, 0), 4) AS human_review_rate,
+    removed,
+    ROUND(CAST(removed AS DECIMAL(10,4)) / NULLIF(human_reviewed, 0), 4) AS removal_rate_given_review
+FROM funnel
+ORDER BY week;
+```
+
+**Conversion Notes**:
+- `DATE_TRUNC('week', ts)` → `DATE(ts - INTERVAL WEEKDAY(ts) DAY)` (WEEKDAY returns 0=Monday, aligning with PG ISO week start)
+- `::DECIMAL` (3 occurrences) → `CAST(... AS DECIMAL(10,4))`
+
+#### Problem 13 (MySQL): Cohort Retention — Creator Retention After First Violation
+
+```sql
+WITH first_violation AS (
+    SELECT
+        ci.creator_id,
+        DATE(DATE_FORMAT(MIN(ma.actioned_at), '%Y-%m-01')) AS cohort_month,
+        MIN(ma.actioned_at) AS first_violation_date
+    FROM moderation_actions ma
+    JOIN content_items ci ON ma.content_id = ci.content_id
+    WHERE ma.action = 'remove'
+    GROUP BY ci.creator_id
+),
+post_activity AS (
+    SELECT DISTINCT
+        fv.creator_id,
+        fv.cohort_month,
+        CASE WHEN EXISTS (
+            SELECT 1 FROM content_items ci2
+            WHERE ci2.creator_id = fv.creator_id
+              AND ci2.created_at BETWEEN fv.first_violation_date + INTERVAL 30 DAY
+                                     AND fv.first_violation_date + INTERVAL 60 DAY
+        ) THEN 1 ELSE 0 END AS active_30d,
+        CASE WHEN EXISTS (
+            SELECT 1 FROM content_items ci2
+            WHERE ci2.creator_id = fv.creator_id
+              AND ci2.created_at BETWEEN fv.first_violation_date + INTERVAL 60 DAY
+                                     AND fv.first_violation_date + INTERVAL 90 DAY
+        ) THEN 1 ELSE 0 END AS active_60d,
+        CASE WHEN EXISTS (
+            SELECT 1 FROM content_items ci2
+            WHERE ci2.creator_id = fv.creator_id
+              AND ci2.created_at BETWEEN fv.first_violation_date + INTERVAL 90 DAY
+                                     AND fv.first_violation_date + INTERVAL 120 DAY
+        ) THEN 1 ELSE 0 END AS active_90d
+    FROM first_violation fv
+)
+SELECT
+    cohort_month,
+    COUNT(*) AS cohort_size,
+    ROUND(AVG(active_30d), 3) AS retention_30d,
+    ROUND(AVG(active_60d), 3) AS retention_60d,
+    ROUND(AVG(active_90d), 3) AS retention_90d
+FROM post_activity
+GROUP BY cohort_month
+ORDER BY cohort_month;
+```
+
+**Conversion Notes**:
+- `DATE_TRUNC('month', ts)` → `DATE(DATE_FORMAT(ts, '%Y-%m-01'))` (truncate to first of month)
+- `INTERVAL '30 days'` → `INTERVAL 30 DAY` (6 occurrences across the BETWEEN clauses)
+
+#### Problem 14 (MySQL): Recursive CTE — Escalation Chains
+
+```sql
+-- Assume moderation_actions has an additional column: parent_action_id BIGINT (nullable)
+
+WITH RECURSIVE action_chain AS (
+    -- Base case: root actions (no parent)
+    SELECT
+        action_id,
+        content_id,
+        moderator_type,
+        action,
+        actioned_at,
+        parent_action_id,
+        1 AS chain_depth,
+        CAST(action_id AS CHAR(200)) AS chain_path
+    FROM moderation_actions
+    WHERE content_id = 12345  -- parameterize
+      AND parent_action_id IS NULL
+
+    UNION ALL
+
+    -- Recursive step: follow the chain
+    SELECT
+        ma.action_id,
+        ma.content_id,
+        ma.moderator_type,
+        ma.action,
+        ma.actioned_at,
+        ma.parent_action_id,
+        ac.chain_depth + 1,
+        CONCAT(ac.chain_path, ',', ma.action_id)
+    FROM moderation_actions ma
+    JOIN action_chain ac ON ma.parent_action_id = ac.action_id
+    WHERE ac.chain_depth < 10  -- safety limit
+)
+SELECT
+    chain_depth,
+    action_id,
+    moderator_type,
+    action,
+    actioned_at,
+    chain_path
+FROM action_chain
+ORDER BY chain_depth;
+```
+
+**Conversion Notes**:
+- `ARRAY[action_id]` → `CAST(action_id AS CHAR(200))` (MySQL has no array type; use comma-separated string instead)
+- `chain_path || ma.action_id` (PG array append) → `CONCAT(chain_path, ',', ma.action_id)` (string concatenation)
+- Output format difference: PG shows `{1,2,3}` (array literal), MySQL shows `1,2,3` (plain string)
+
+#### Problem 15 (MySQL): Complex Analytics — Comparing Enforcement Consistency Across Regions
+
+```sql
+WITH regional_rates AS (
+    SELECT
+        ma.violation_category,
+        ci.region,
+        SUM(CASE WHEN ma.action = 'remove' THEN 1 ELSE 0 END) AS removals,
+        COUNT(*) AS total_actions,
+        CAST(SUM(CASE WHEN ma.action = 'remove' THEN 1 ELSE 0 END) AS DECIMAL(10,4)) / NULLIF(COUNT(*), 0) AS removal_rate
+    FROM moderation_actions ma
+    JOIN content_items ci ON ma.content_id = ci.content_id
+    WHERE ma.actioned_at >= CURRENT_DATE - INTERVAL 90 DAY
+    GROUP BY ma.violation_category, ci.region
+    HAVING COUNT(*) >= 100  -- minimum sample size
+),
+category_stats AS (
+    SELECT
+        violation_category,
+        AVG(removal_rate) AS mean_rate,
+        STDDEV(removal_rate) AS std_rate
+    FROM regional_rates
+    GROUP BY violation_category
+)
+SELECT
+    rr.violation_category,
+    rr.region,
+    rr.removal_rate,
+    cs.mean_rate,
+    cs.std_rate,
+    (rr.removal_rate - cs.mean_rate) / NULLIF(cs.std_rate, 0) AS z_score,
+    CASE
+        WHEN ABS((rr.removal_rate - cs.mean_rate) / NULLIF(cs.std_rate, 0)) > 2 THEN 'OUTLIER'
+        ELSE 'NORMAL'
+    END AS flag
+FROM regional_rates rr
+JOIN category_stats cs ON rr.violation_category = cs.violation_category
+ORDER BY ABS((rr.removal_rate - cs.mean_rate) / NULLIF(cs.std_rate, 0)) DESC;
+```
+
+**Conversion Notes**:
+- `COUNT(*) FILTER (WHERE ma.action = 'remove')` → `SUM(CASE WHEN ma.action = 'remove' THEN 1 ELSE 0 END)` (MySQL has no FILTER clause; 2 occurrences)
+- `::DECIMAL` → `CAST(... AS DECIMAL(10,4))`
+- `INTERVAL '90 days'` → `INTERVAL 90 DAY`
+- `STDDEV()` works identically in both dialects
+
+### 2.3 PostgreSQL vs MySQL — DQL Quick Reference
+
+| Category | Construct | PostgreSQL | MySQL 8+ | Notes |
+|----------|-----------|-----------|----------|-------|
+| **Type Casting** | Cast operator | `expr::TYPE` | `CAST(expr AS TYPE)` | PG also supports `CAST()` |
+| **Type Casting** | Decimal cast | `expr::DECIMAL` | `CAST(expr AS DECIMAL(M,D))` | MySQL requires precision/scale |
+| **Date/Time** | Interval literal | `INTERVAL '30 days'` | `INTERVAL 30 DAY` | MySQL: no quotes, singular unit |
+| **Date/Time** | Truncate to week | `DATE_TRUNC('week', ts)` | `DATE(ts - INTERVAL WEEKDAY(ts) DAY)` | Both use ISO Monday-start weeks |
+| **Date/Time** | Truncate to month | `DATE_TRUNC('month', ts)` | `DATE(DATE_FORMAT(ts, '%Y-%m-01'))` | — |
+| **Date/Time** | Extract epoch | `EXTRACT(EPOCH FROM interval)` | `TIMESTAMPDIFF(SECOND, start, end)` | TIMESTAMPDIFF returns integer |
+| **Date/Time** | Date difference | `date1 - date2` (returns int) | `DATEDIFF(date1, date2)` | Same arg order |
+| **Date/Time** | Timestamp difference | `ts1 - ts2` (returns interval) | `TIMESTAMPDIFF(unit, ts2, ts1)` | MySQL arg order: unit, start, end |
+| **Date/Time** | Current date | `CURRENT_DATE` | `CURRENT_DATE` | Identical |
+| **Aggregation** | Filtered aggregate | `COUNT(*) FILTER (WHERE cond)` | `SUM(CASE WHEN cond THEN 1 ELSE 0 END)` | MySQL has no FILTER clause |
+| **Aggregation** | Median | `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x)` | ROW_NUMBER-based CTE (see below) | MySQL has no built-in percentile |
+| **Aggregation** | Std deviation (sample) | `STDDEV(x)` | `STDDEV(x)` | Identical |
+| **Aggregation** | Std deviation (pop) | `STDDEV_POP(x)` | `STDDEV_POP(x)` | Identical |
+| **Arrays** | Array literal | `ARRAY[val]` | No native equivalent | Use JSON_ARRAY(val) or CAST to CHAR |
+| **Arrays** | Array append | `arr \|\| val` | `CONCAT(str, ',', val)` | MySQL: simulate with strings |
+| **Window Functions** | ROW_NUMBER, RANK, etc. | Supported | Supported (MySQL 8+) | Identical syntax |
+| **Window Functions** | Frame specification | `ROWS BETWEEN ...` | `ROWS BETWEEN ...` | Identical syntax |
+| **Recursive CTEs** | Syntax | `WITH RECURSIVE ...` | `WITH RECURSIVE ...` | Identical base syntax |
+| **Recursive CTEs** | Path tracking | Array column | String concatenation via CONCAT | Different output format |
+| **Other** | Division guard | `NULLIF(expr, 0)` | `NULLIF(expr, 0)` | Identical |
+| **Other** | Boolean handling | `CASE WHEN is_removed THEN 1` | `CASE WHEN is_removed THEN 1` | Both support boolean in CASE |
+| **Other** | ROUND | `ROUND(expr, n)` | `ROUND(expr, n)` | Identical |
+
+**MySQL Median Pattern (reusable template)**:
+
+```sql
+-- Computes exact median per group using ROW_NUMBER.
+-- Handles both odd (one middle row) and even (average of two middle rows) counts.
+WITH ranked AS (
+    SELECT
+        group_col,
+        value_col,
+        ROW_NUMBER() OVER (PARTITION BY group_col ORDER BY value_col) AS rn,
+        COUNT(*) OVER (PARTITION BY group_col) AS cnt
+    FROM source_table
+)
+SELECT
+    group_col,
+    AVG(value_col) AS median_value
+FROM ranked
+WHERE rn IN (FLOOR((cnt + 1) / 2), CEIL((cnt + 1) / 2))
+GROUP BY group_col;
+```
 
 ---
 
